@@ -30,14 +30,14 @@ Sceptic is associated with the following packages.
 - sklearn >= 1.0.2 
 
 ## Examples (python script) <a id="examples"></a>
-Please download the data from [scGEM](https://github.com/)
+We downloaded the processed [scGEM](https://github.com/caokai1073/UnionCom/tree/master/scGEM) dataset from UnionCom’s GitHub page.
 
 ```bash
 $ python test/scGEM/scGEM.py 
 ```
 The script will generate 4 outputs from Sceptic described in the section above and save it at: test/scGEM/.
 
-## Parameters of ```class Sceptic``` <a id="parameter"></a>
+## Parameters of ```Sceptic``` <a id="parameter"></a>
 
 The list of parameters is given below:
 > + ```kernel```: The kernel function for sceptic SVM classfier (default=('linear', 'rbf')). Sklearn supports four kinds of [kernels](https://scikit-learn.org/stable/modules/svm.html#kernel-functions): linear, polynomial, rbf, sigmoid.  
@@ -68,14 +68,16 @@ In case you have questions, reach out to `gangliuw@uw.edu`.
 
 
 ## Citation<a id="citation"></a>
-[Pseudotime analysis for time-series single-cell sequencing and imaging data (to be updated)](https://ganglitarheel.github.io/publications/)
+[Pseudotime analysis for time-series single-cell sequencing and imaging data (to be updated)](https://www.biorxiv.org/content/10.1101/2023.11.03.565575v1)
 
-If you have found our work useful, please consider citing us(to be updated):
+If you have found our work useful, please consider citing us:
 
 ```
-@article{li2023sceptic,
+@article{li2023pseudotime,
   title={Pseudotime analysis for time-series single-cell sequencing and imaging data},
   author={Gang Li, Hyeon-Jin Kim, Sriram Pendyala, Ran Zhang, Christine M. Disteche, Jean-Philippe Vert, Xinxian Deng, Doug Fowler, and William Stafford Noble},
+  doi = {10.1101/2023.11.03.565575},	
+  url = {https://doi.org/10.1101%2F2023.11.03.565575},
   journal={bioRxiv},
   year={2023},
   publisher={Cold Spring Harbor Laboratory}
