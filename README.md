@@ -17,9 +17,9 @@ Sceptic can perform pseudotime analysis on various types of single-cell/single-n
 
 
 ## Installation<a id="installation"></a>
-Sceptic software is available on the Python package index (PyPI), latest version 0.0.2. To install it using pip, simply type:
+Sceptic software is available on the Python package index (PyPI), latest version 0.0.3. To install it using pip, simply type:
 ```bash
-$ pip install -i https://test.pypi.org/simple/ sceptic
+$ pip install sceptic
 ```
 
 ## Enviroment<a id="enviroment"></a>
@@ -68,7 +68,7 @@ In case you have questions, reach out to `gangliuw@uw.edu`.
 
 
 ## Citation<a id="citation"></a>
-[Pseudotime analysis for time-series single-cell sequencing and imaging data (to be updated)](https://www.biorxiv.org/content/10.1101/2023.11.03.565575v1)
+[Pseudotime analysis for time-series single-cell sequencing and imaging data](https://www.biorxiv.org/content/10.1101/2023.11.03.565575v1)
 
 If you have found our work useful, please consider citing us:
 
