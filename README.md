@@ -15,7 +15,7 @@ Sceptic can perform pseudotime analysis on various types of single-cell/single-n
 
 
 ## Installation<a id="installation"></a>
-Sceptic software is available on the Python package index (PyPI), latest version 0.3.2. To install it using pip, simply type:
+Sceptic software is available on the Python package index (PyPI), latest version 0.3.3. To install it using pip, simply type:
 ```bash
 $ pip install sceptic
 ```

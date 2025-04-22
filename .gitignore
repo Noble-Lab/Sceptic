@@ -1,6 +1,6 @@
 
 *.pyc
-*.toml
+.toml
 *.ipynb
 src/sceptic/sceptic_object_test.py
 *dist
