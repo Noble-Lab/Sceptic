@@ -4,12 +4,12 @@ import pickle
 from sklearn import preprocessing
 import sys
 import os
-# sceptic_root = os.path.expanduser('~/proj/2021-GL-vcs-integration/src/2025-04-21-new-implementation/Sceptic/src')
-# sys.path.insert(0, sceptic_root)
-# print("Path inserted:", sceptic_root)
-# print("Files in path:", os.listdir(sceptic_root))
-# from sceptic.sceptic import run_sceptic_and_evaluate
-from sceptic import run_sceptic_and_evaluate
+sceptic_root = os.path.expanduser('~/proj/2021-GL-vcs-integration/src/2025-04-21-new-implementation/Sceptic/src')
+sys.path.insert(0, sceptic_root)
+print("Path inserted:", sceptic_root)
+print("Files in path:", os.listdir(sceptic_root))
+from sceptic.sceptic import run_sceptic_and_evaluate
+#from sceptic import run_sceptic_and_evaluate
 
 # === Load example dataset ===
 data_concat = np.loadtxt("example_data/scGEM/expression.txt")

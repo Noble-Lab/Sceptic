@@ -11,13 +11,11 @@
 
 Sceptic can perform pseudotime analysis on various types of single-cell/single-nucleus data. The model takes as input a collection of single-cell/single-nucleus data and then learns the relationship between the observed data and the associated time stamps, and finally uses the trained model to assign to each cell a real-valued pseudotime. Ideally, the pseudotimes assigned by Sceptic reflect each cell's progression along a notion of time---developmental, cell cycle, disease progression, aging---that is appropriate to the given data. Ideally, the pseudotimes assigned by Sceptic reflect each cell's progression along a notion of time---developmental, cell cycle, disease progression, aging---that is appropriate to the given data.
 
-<img src="sceptic-schematic.jpg"
-     alt="Sceptic schematic icon"
-     style="float: left; margin-right: 10px;" />
+![Sceptic schematic](https://raw.githubusercontent.com/Noble-Lab/Sceptic/main/sceptic-schematic.jpg)
 
 
 ## Installation<a id="installation"></a>
-Sceptic software is available on the Python package index (PyPI), latest version 0.0.3. To install it using pip, simply type:
+Sceptic software is available on the Python package index (PyPI), latest version 0.3.2. To install it using pip, simply type:
 ```bash
 $ pip install sceptic
 ```
@@ -40,10 +38,16 @@ The script will generate 4 outputs from Sceptic described in the section above a
 ## Parameters of ```Sceptic``` <a id="parameter"></a>
 
 The list of parameters is given below:
+> + ```eFold```: # of folds for external cross-validation (default=3).
+> + ```iFold```: # of folds for internal cross-validation (default=4).
+
+For SVM implementation:
 > + ```kernel```: The kernel function for sceptic SVM classfier (default=('linear', 'rbf')). Sklearn supports four kinds of [kernels](https://scikit-learn.org/stable/modules/svm.html#kernel-functions): linear, polynomial, rbf, sigmoid.  
 > + ```C```: The C parameter for rbf kernel (default=[0.1, 1, 10]). The C parameter trades off correct classification of training examples against maximization of the decision function’s margin. See more details [here](https://scikit-learn.org/stable/auto_examples/svm/plot_rbf_parameters.html#sphx-glr-auto-examples-svm-plot-rbf-parameters-py).
-> + ```eFold```: # of folds for external cross-validation (default=5).
-> + ```iFold```: # of folds for internal cross-validation (default=4).
+
+For XGboost implementation:
+> + ```max_depth``` : Maximum depth of a tree (default=[3, 5]). Increasing this value will make the model more complex and more likely to overfit. 0 indicates no limit on depth. Beware that XGBoost aggressively consumes memory when training a deep tree. See more details [here](https://xgboost.readthedocs.io/en/stable/parameter.html).
+> + ```learning_rate``` : Step size shrinkage used in update to prevent overfitting (default=[0.1, 0.3]). After each boosting step, we can directly get the weights of new features, and eta shrinks the feature weights to make the boosting process more conservative. See more details [here](https://xgboost.readthedocs.io/en/stable/parameter.html).
 
 ## Input<a id="input"></a>
 
@@ -51,8 +55,11 @@ In case the user is providing the input data:
 - `data_concat`: the input cell by measurement matrix. (# of cells by # of measurements)
 - `label`: processed cell time label. (# of cells by 1)
 - `label_list`: unique list of possible cell time labels. (# of time points by 1)
-- `parameters`: Sceptic parameter dictionary. (default={'kernel': ('linear', 'rbf'), 'C': [0.1, 1, 10]}
-)
+- `parameters`: Sceptic parameter dictionary. (SVM default={'kernel': ('linear', 'rbf'), 'C': [0.1, 1, 10]}; XGboost default= {"max_depth": [3, 5], "learning_rate": [0.1, 0.3],
+        "n_estimators": [100], "subsample": [0.8]})
+- `method`: "svm" or "xgboost" implementation. For large dataset, we recommend "xgboost" implementation.
+- `use_gpu`: Only applies if method="xgboost".
+
 
 ## Output<a id="output"></a>
 
