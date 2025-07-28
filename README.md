@@ -27,7 +27,7 @@ Sceptic is associated with the following packages.
 - pandas >= 1.3.5
 - sklearn >= 1.0.2 
 
-## Examples (python script) <a id="examples"></a>
+## Example (python script) <a id="example"></a>
 We downloaded the processed [scGEM](https://github.com/caokai1073/UnionCom/tree/master/scGEM) dataset from UnionCom’s GitHub page.
 
 ```bash
@@ -75,18 +75,19 @@ In case you have questions, reach out to `gangliuw@uw.edu`.
 
 
 ## Citation<a id="citation"></a>
-[Pseudotime analysis for time-series single-cell sequencing and imaging data](https://www.biorxiv.org/content/10.1101/2023.11.03.565575v1)
+[Pseudotime analysis for time-series single-cell sequencing and imaging data](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-025-03679-3)
 
 If you have found our work useful, please consider citing us:
 
+Li, G., Kim, HJ., Pendyala, S. et al. Sceptic: pseudotime analysis for time-series single-cell sequencing and imaging data. Genome Biol 26, 209 (2025). https://doi.org/10.1186/s13059-025-03679-3
+
 ```
-@article{li2023pseudotime,
-  title={Pseudotime analysis for time-series single-cell sequencing and imaging data},
-  author={Gang Li, Hyeon-Jin Kim, Sriram Pendyala, Ran Zhang, Christine M. Disteche, Jean-Philippe Vert, Xinxian Deng, Doug Fowler, and William Stafford Noble},
-  doi = {10.1101/2023.11.03.565575},	
-  url = {https://doi.org/10.1101%2F2023.11.03.565575},
-  journal={bioRxiv},
-  year={2023},
-  publisher={Cold Spring Harbor Laboratory}
+@article{li2025sceptic,
+  title={Sceptic: pseudotime analysis for time-series single-cell sequencing and imaging data},
+  author={Li, Gang and Kim, Hyeon-Jin and Pendyala, Sriram and Zhang, Ran and Vert, Jean-Philippe and Disteche, Christine M and Deng, Xinxian and Fowler, Douglas M and Noble, William Stafford},
+  journal={Genome Biology},
+  volume={26},
+  pages={209},
+  year={2025}
 }
 ```
