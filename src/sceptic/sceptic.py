@@ -264,10 +264,10 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
         kf = KFold(n_splits=eFold, random_state=23, shuffle=True)
         cv_splits = list(kf.split(data))
     else:  # loto
-        # Leave-one-time-out: hold out each time point
+        # Leave-one-time-out: hold out each unique value in labels
         cv_splits = []
-        for time_point in label_list:
-            test_mask = (labels == time_point)
+        for label_value in unique_labels:
+            test_mask = (labels == label_value)
             train_index = np.where(~test_mask)[0]
             test_index = np.where(test_mask)[0]
             if len(test_index) > 0 and len(train_index) > 0:
@@ -284,10 +284,19 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
             if cv_strategy == "loto":
                 # Find which time point is held out
                 held_out_label = labels[test_index[0]]
+                # Find the index of the held-out label in the original encoding
+                held_out_encoded = encoded_labels[test_index[0]]
                 # Create label_list_train excluding held-out time
-                label_list_train_mask = (label_list != held_out_label)
+                label_list_train_mask = np.ones(len(label_list), dtype=bool)
+                label_list_train_mask[held_out_encoded] = False
                 label_list_train = label_list[label_list_train_mask]
                 num_classes = len(label_list_train)
+
+                # Re-encode training labels to be 0, 1, 2, ..., num_classes-1
+                # This is necessary because encoded_labels might not be consecutive after holdout
+                unique_train_labels = np.unique(y_train)
+                label_mapping = {old_label: new_label for new_label, old_label in enumerate(unique_train_labels)}
+                y_train = np.array([label_mapping[label] for label in y_train])
             else:
                 num_classes = len(label_list)
 
@@ -307,8 +316,17 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
             # Train and predict
             clf.fit(X_train, y_train)
             predicted = clf.predict(X_test)
-            label_predicted[test_index] = predicted
-            cm += sklearn.metrics.confusion_matrix(y_test, predicted, labels=np.arange(len(label_list)))
+
+            # For LOTO, map predictions back to original label space
+            if cv_strategy == "loto":
+                # Create reverse mapping from re-encoded to original labels
+                reverse_mapping = {new_label: old_label for old_label, new_label in label_mapping.items()}
+                predicted_original = np.array([reverse_mapping[pred] for pred in predicted])
+                label_predicted[test_index] = predicted_original
+                cm += sklearn.metrics.confusion_matrix(y_test, predicted_original, labels=np.arange(len(label_list)))
+            else:
+                label_predicted[test_index] = predicted
+                cm += sklearn.metrics.confusion_matrix(y_test, predicted, labels=np.arange(len(label_list)))
 
             # Get probabilities and compute pseudotime
             try:
