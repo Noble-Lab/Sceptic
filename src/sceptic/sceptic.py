@@ -7,6 +7,8 @@ MIT LICENSE
 ---------------------
 '''
 from sklearn.model_selection import KFold, GridSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn import svm
 import numpy as np
 import sklearn
@@ -127,20 +129,32 @@ def _create_xgb_regressor(use_gpu=False):
         return xgb.XGBRegressor(objective='reg:squarederror')
 
 def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, method="svm", use_gpu=False,
-                             cv_strategy="kfold", model_type="classification", eFold=3, iFold=4):
+                             cv_strategy="kfold", model_type="classification", eFold=3, iFold=4,
+                             scale_features=None):
     """
     Run pseudotime estimation using SVM or XGBoost with flexible CV and model types.
 
     Args:
         data (np.ndarray): Cell-by-feature matrix (cells × features).
         labels (np.ndarray): Ground-truth time labels for each cell.
-            Can be either:
-            - Actual time values (e.g., [0, 8, 16, 24, 30, ...])
-            - Pre-encoded categorical labels (e.g., [0, 1, 2, 3, 4, ...])
-        label_list (np.ndarray, optional): Ordered unique time points for pseudotime calculation.
-            If None, will be automatically inferred from unique values in labels.
-            Use this to specify actual biological time points when labels are encoded.
-            Example: labels=[0,0,1,1,2,2], label_list=[0, 8, 16]
+            ⚠️ CRITICAL: Different requirements for classification vs regression!
+
+            For classification (model_type="classification"):
+            - Can be encoded (e.g., [0, 1, 2, ...]) OR actual time values
+            - Function will encode internally if needed
+            - Example: labels=[0,0,1,1,2,2] with label_list=[0, 8, 16]
+
+            For regression (model_type="regression"):
+            - MUST be actual time values (e.g., [0, 8, 16, 0, 8, 16])
+            - Values used directly for training (NO encoding)
+            - ❌ WRONG: labels=[0,1,2,0,1,2]  # Inflates performance!
+            - ✅ RIGHT: labels=[0,8,16,0,8,16]  # Actual biological time
+
+        label_list (np.ndarray, optional): Ordered unique time points.
+            For classification: Used for pseudotime calculation (probability weighting)
+            For regression: Should match the time scale in labels
+            If None, automatically inferred from unique values in labels.
+            Example: label_list=[0, 8, 16, 24, 30]
         parameters (dict, optional): Grid search parameters for the classifier/regressor.
             If None, uses default parameters.
         method (str): "svm" or "xgboost". Note: regression mode only supports "xgboost".
@@ -153,6 +167,8 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
             - "regression": Direct regression (XGBoost only, outputs continuous values)
         eFold (int): Number of external CV folds (used when cv_strategy="kfold").
         iFold (int): Number of internal GridSearchCV folds.
+        scale_features (bool, optional): When True, wrap the estimator in a pipeline that applies
+            `StandardScaler` within each CV split. Defaults to True for regression and False otherwise.
 
     Returns:
         tuple: (cm, label_predicted, pseudotime, sceptic_prob)
@@ -179,13 +195,17 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
         ... )
 
         >>> # Example 3: Direct regression with k-fold CV
+        >>> # IMPORTANT: Pass actual time values, not encoded labels!
+        >>> time_labels = np.array([0, 8, 16, 24, 30, ...])  # Actual time
         >>> cm, pred, ptime, prob = run_sceptic_and_evaluate(
-        ...     data, labels, method="xgboost", model_type="regression"
+        ...     data, time_labels, method="xgboost", model_type="regression"
         ... )
 
         >>> # Example 4: LOTO evaluation with regression
+        >>> # IMPORTANT: Use actual time values for regression!
+        >>> time_labels = np.array([0, 8, 16, 24, 30, ...])  # Actual time
         >>> cm, pred, ptime, prob = run_sceptic_and_evaluate(
-        ...     data, labels, method="xgboost", cv_strategy="loto", model_type="regression"
+        ...     data, time_labels, method="xgboost", cv_strategy="loto", model_type="regression"
         ... )
     """
     from sklearn import preprocessing
@@ -197,6 +217,9 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
         raise ValueError(f"cv_strategy must be 'kfold' or 'loto', got '{cv_strategy}'")
     if model_type == "regression" and method != "xgboost":
         raise ValueError("Regression mode only supports method='xgboost'")
+
+    if scale_features is None:
+        scale_features = (model_type == "regression")
 
     # Handle labels and label_list based on model type
     unique_labels = np.unique(labels)
@@ -224,28 +247,98 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
             label_list = unique_labels
         encoded_labels = None  # Not needed for regression
 
+        # ⚠️ Input validation for common mistakes
+        import os
+        if os.environ.get('SCEPTIC_IGNORE_REGRESSION_WARNINGS') != '1':
+            # Check 1: Are labels suspiciously close to integers 0, 1, 2, ...?
+            if len(unique_labels) > 2 and np.allclose(unique_labels, np.arange(len(unique_labels))):
+                warnings.warn(
+                    "\n" + "="*80 + "\n"
+                    "⚠️  REGRESSION WARNING: Labels look like encoded values (0, 1, 2, ...)\n"
+                    "="*80 + "\n"
+                    "Your labels appear to be encoded categorical values, not actual time values!\n"
+                    "\n"
+                    "For regression, you MUST pass actual time values:\n"
+                    "  ❌ WRONG:   labels=[0, 0, 1, 1, 2, 2]  # Encoded (0, 1, 2, ...)\n"
+                    "  ✅ CORRECT: labels=[0, 8, 16, 0, 8, 16]  # Actual time values\n"
+                    "\n"
+                    f"Current labels: {unique_labels}\n"
+                    "\n"
+                    "This mistake inflates performance by 5-15% because predicting 0-{len(unique_labels)-1}\n"
+                    "is much easier than predicting actual biological time values.\n"
+                    "\n"
+                    "If you intended classification, use model_type='classification' instead.\n"
+                    "To suppress this warning: export SCEPTIC_IGNORE_REGRESSION_WARNINGS=1\n"
+                    + "="*80,
+                    UserWarning,
+                    stacklevel=2
+                )
+
+            # Check 2: If label_list provided, do labels cover similar range?
+            if label_list is not None and len(label_list) > 1:
+                label_range = unique_labels.max() - unique_labels.min()
+                list_range = label_list.max() - label_list.min()
+                if label_range < 0.3 * list_range and label_range > 0:
+                    warnings.warn(
+                        "\n" + "="*80 + "\n"
+                        f"⚠️  REGRESSION WARNING: Label range mismatch\n"
+                        "="*80 + "\n"
+                        f"Label range ({label_range:.1f}) is much smaller than label_list range ({list_range:.1f}).\n"
+                        f"  Labels:     [{unique_labels.min():.1f}, {unique_labels.max():.1f}]\n"
+                        f"  label_list: [{label_list.min():.1f}, {label_list.max():.1f}]\n"
+                        "\n"
+                        "This often indicates encoded labels (0, 1, 2, ...) instead of actual time.\n"
+                        "Regression models need actual time values for meaningful predictions.\n"
+                        "\n"
+                        "To suppress: export SCEPTIC_IGNORE_REGRESSION_WARNINGS=1\n"
+                        + "="*80,
+                        UserWarning,
+                        stacklevel=2
+                    )
+
     # Set default parameters if none provided
-    if not parameters:
+    if parameters:
+        param_grid = parameters
+    else:
         if model_type == "classification":
             if method == "svm":
-                parameters = {
+                param_grid = {
                     "C": [1, 10],
                     "kernel": ["linear", "rbf"],
                     "gamma": ["scale"]
                 }
             elif method == "xgboost":
-                parameters = {
+                param_grid = {
                     "max_depth": [3, 5],
                     "learning_rate": [0.1, 0.3],
                     "n_estimators": [100],
                     "subsample": [0.8]
                 }
+            else:
+                param_grid = {}
         else:  # regression
-            parameters = {
-                "max_depth": [3, 5],
-                "learning_rate": [0.1, 0.3],
-                "n_estimators": [100]
-            }
+            if cv_strategy == "loto":
+                param_grid = {
+                    "max_depth": [2, 3],
+                    "min_child_weight": [3, 5],
+                    "learning_rate": [0.05],
+                    "n_estimators": [200],
+                    "subsample": [0.8],
+                    "colsample_bytree": [0.8],
+                    "reg_lambda": [1.0],
+                    "reg_alpha": [0.0, 0.5]
+                }
+            else:
+                param_grid = {
+                    "max_depth": [3, 4],
+                    "min_child_weight": [1, 4],
+                    "learning_rate": [0.05, 0.1],
+                    "n_estimators": [200],
+                    "subsample": [0.8],
+                    "colsample_bytree": [0.8],
+                    "reg_lambda": [0.0, 1.0],
+                    "reg_alpha": [0.0, 0.5]
+                }
 
     # Initialize output arrays
     if model_type == "classification":
@@ -306,10 +399,10 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
                     num_classes=num_classes,
                     use_gpu=use_gpu
                 )
-                clf = GridSearchCV(xgb_model, parameters, cv=iFold)
+                clf = GridSearchCV(xgb_model, param_grid or {}, cv=iFold)
             elif method == "svm":
                 svc = svm.SVC(probability=True)
-                clf = GridSearchCV(svc, parameters, cv=iFold)
+                clf = GridSearchCV(svc, param_grid or {}, cv=iFold)
             else:
                 raise ValueError(f"Unsupported method '{method}'. Choose 'svm' or 'xgboost'.")
 
@@ -349,7 +442,20 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
 
             # Initialize regressor
             xgb_model = _create_xgb_regressor(use_gpu=use_gpu)
-            clf = GridSearchCV(xgb_model, parameters, cv=iFold)
+            if scale_features:
+                estimator = Pipeline([
+                    ("scaler", StandardScaler()),
+                    ("regressor", xgb_model)
+                ])
+                if param_grid:
+                    tuned_grid = {f"regressor__{key}": value for key, value in param_grid.items()}
+                else:
+                    tuned_grid = {}
+            else:
+                estimator = xgb_model
+                tuned_grid = param_grid or {}
+
+            clf = GridSearchCV(estimator, tuned_grid, cv=iFold)
 
             # Train and predict
             clf.fit(X_train, y_train)

@@ -65,6 +65,34 @@ cm, pred, pseudotime, prob = run_sceptic_and_evaluate(
 - ✅ More intuitive and less error-prone
 - ✅ Backward compatible with existing code
 
+### ⚠️ IMPORTANT: Regression Mode Label Requirements
+
+**If you're using `model_type="regression"` (direct XGBoost regression), you MUST pass actual time values, NOT encoded labels!**
+
+This is a common mistake that inflates performance by 5-15%:
+
+```python
+# ❌ WRONG - DO NOT DO THIS with regression mode!
+from sklearn.preprocessing import LabelEncoder
+labels = LabelEncoder().fit_transform(time_values)  # Creates 0, 1, 2, ...
+run_sceptic_and_evaluate(data, labels, model_type="regression")
+# This will train on 0-N instead of actual time, giving inflated metrics!
+
+# ✅ CORRECT - Use actual time values for regression
+time_labels = np.array([0, 8, 16, 24, 30, ...])  # Actual hours/days
+run_sceptic_and_evaluate(data, time_labels, model_type="regression")
+```
+
+**Why this matters:**
+- Predicting 0-6 is much easier than predicting actual biological time (0-60 days)
+- Your correlation metrics will be artificially inflated by ~10%
+- Error metrics (MAE, RMSE) will be on the wrong scale
+- Results won't be comparable to other methods
+
+**For classification mode** (`model_type="classification"`, the default), either format works fine - the function handles encoding internally.
+
+**The validation system will warn you** if it detects this mistake, but it's better to use the correct format from the start!
+
 Sceptic also includes utility modules for comprehensive evaluation and publication-quality visualization!
 
 ### Evaluation Utilities

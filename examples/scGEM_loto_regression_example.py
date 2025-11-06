@@ -37,20 +37,26 @@ data_path = os.path.join(os.path.dirname(__file__), '..', 'example_data', 'scGEM
 data_concat = np.loadtxt(os.path.join(data_path, 'expression.txt'))
 y = np.loadtxt(os.path.join(data_path, 'expression_type.txt'))
 
-# Encode labels
-lab = preprocessing.LabelEncoder()
-label = lab.fit_transform(y)
+# IMPORTANT: Different label formats for classification vs regression
+# - Classification: Use encoded labels (0, 1, 2, ...)
+# - Regression: Use actual time values (0, 8, 16, 24, 30)
 
-# Map to actual time points
+# For classification: Encode labels to 0, 1, 2, 3, 4
+lab = preprocessing.LabelEncoder()
+label_encoded = lab.fit_transform(y)
+
+# For regression: Map to actual time values
 time_dictionary = {1.0: 8, 2.0: 16, 3.0: 24, 4.0: 30, 0.0: 0}
-y_mapped = pd.Series(np.unique(label)).map(time_dictionary).to_numpy()
-label_list = np.transpose(np.unique(y_mapped))
+label_time = np.array([time_dictionary[val] for val in y])
+
+# label_list: Actual biological time points for pseudotime calculation
+label_list = np.array([0, 8, 16, 24, 30])
 
 print(f"  Data shape: {data_concat.shape}")
 print(f"  Number of cells: {data_concat.shape[0]}")
 print(f"  Number of features: {data_concat.shape[1]}")
 print(f"  Time points: {label_list}")
-print(f"  Cells per time point: {dict(zip(label_list, [np.sum(label == i) for i in range(len(label_list))]))}")
+print(f"  Cells per time point: {dict(zip(label_list, [np.sum(label_encoded == i) for i in range(len(label_list))]))}")
 
 # Hyperparameters
 parameters = {
@@ -67,7 +73,7 @@ print("-" * 80)
 
 cm_baseline, pred_baseline, ptime_baseline, prob_baseline = run_sceptic_and_evaluate(
     data=data_concat,
-    labels=label,
+    labels=label_encoded,  # ✅ Encoded labels for classification
     label_list=label_list,
     parameters=parameters,
     method="xgboost",
@@ -77,7 +83,7 @@ cm_baseline, pred_baseline, ptime_baseline, prob_baseline = run_sceptic_and_eval
 )
 
 # Evaluate
-metrics_baseline = evaluation.compute_correlation_metrics(label, ptime_baseline)
+metrics_baseline = evaluation.compute_correlation_metrics(label_encoded, ptime_baseline)
 print(f"  Spearman correlation: {metrics_baseline['spearman'][0]:.4f} (p={metrics_baseline['spearman'][1]:.2e})")
 print(f"  Pearson correlation: {metrics_baseline['pearson'][0]:.4f} (p={metrics_baseline['pearson'][1]:.2e})")
 print(f"  Confusion Matrix:")
@@ -92,7 +98,7 @@ print("  Holding out each time point and training on others...")
 
 cm_loto, pred_loto, ptime_loto, prob_loto = run_sceptic_and_evaluate(
     data=data_concat,
-    labels=label,
+    labels=label_encoded,  # ✅ Encoded labels for classification
     label_list=label_list,
     parameters=parameters,
     method="xgboost",
@@ -102,7 +108,7 @@ cm_loto, pred_loto, ptime_loto, prob_loto = run_sceptic_and_evaluate(
 )
 
 # Evaluate
-metrics_loto = evaluation.compute_correlation_metrics(label, ptime_loto)
+metrics_loto = evaluation.compute_correlation_metrics(label_encoded, ptime_loto)
 print(f"  Spearman correlation: {metrics_loto['spearman'][0]:.4f} (p={metrics_loto['spearman'][1]:.2e})")
 print(f"  Pearson correlation: {metrics_loto['pearson'][0]:.4f} (p={metrics_loto['pearson'][1]:.2e})")
 print(f"  Confusion Matrix:")
@@ -117,7 +123,7 @@ print("-" * 80)
 
 cm_reg, pred_reg, ptime_reg, prob_reg = run_sceptic_and_evaluate(
     data=data_concat,
-    labels=label,
+    labels=label_time,  # ✅ CRITICAL: Use actual time values for regression!
     label_list=label_list,
     parameters=parameters,
     method="xgboost",
@@ -127,14 +133,14 @@ cm_reg, pred_reg, ptime_reg, prob_reg = run_sceptic_and_evaluate(
 )
 
 # Evaluate
-metrics_reg = evaluation.compute_correlation_metrics(label, ptime_reg)
-metrics_reg_error = evaluation.compute_regression_metrics(label, ptime_reg)
+metrics_reg = evaluation.compute_correlation_metrics(label_time, ptime_reg)
+metrics_reg_error = evaluation.compute_regression_metrics(label_time, ptime_reg)
 print(f"  Spearman correlation: {metrics_reg['spearman'][0]:.4f} (p={metrics_reg['spearman'][1]:.2e})")
 print(f"  Pearson correlation: {metrics_reg['pearson'][0]:.4f} (p={metrics_reg['pearson'][1]:.2e})")
 print(f"  MAE: {metrics_reg_error['mae']:.4f}")
 print(f"  RMSE: {metrics_reg_error['rmse']:.4f}")
 print(f"  Pseudotime range: [{ptime_reg.min():.2f}, {ptime_reg.max():.2f}]")
-print(f"  True label range: [{label.min():.2f}, {label.max():.2f}]")
+print(f"  True label range: [{label_time.min():.2f}, {label_time.max():.2f}]")
 print(f"\n  Note: No confusion matrix (cm={cm_reg}) - this is a regression model!")
 
 # =============================================================================
@@ -146,7 +152,7 @@ print("  Predicting continuous values for completely unseen time points...")
 
 cm_loto_reg, pred_loto_reg, ptime_loto_reg, prob_loto_reg = run_sceptic_and_evaluate(
     data=data_concat,
-    labels=label,
+    labels=label_time,  # ✅ CRITICAL: Use actual time values for regression!
     label_list=label_list,
     parameters=parameters,
     method="xgboost",
@@ -156,8 +162,8 @@ cm_loto_reg, pred_loto_reg, ptime_loto_reg, prob_loto_reg = run_sceptic_and_eval
 )
 
 # Evaluate
-metrics_loto_reg = evaluation.compute_correlation_metrics(label, ptime_loto_reg)
-metrics_loto_reg_error = evaluation.compute_regression_metrics(label, ptime_loto_reg)
+metrics_loto_reg = evaluation.compute_correlation_metrics(label_time, ptime_loto_reg)
+metrics_loto_reg_error = evaluation.compute_regression_metrics(label_time, ptime_loto_reg)
 print(f"  Spearman correlation: {metrics_loto_reg['spearman'][0]:.4f} (p={metrics_loto_reg['spearman'][1]:.2e})")
 print(f"  Pearson correlation: {metrics_loto_reg['pearson'][0]:.4f} (p={metrics_loto_reg['pearson'][1]:.2e})")
 print(f"  MAE: {metrics_loto_reg_error['mae']:.4f}")
