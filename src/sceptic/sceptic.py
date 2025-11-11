@@ -6,10 +6,13 @@ e-mail:gangliuw@uw.edu
 MIT LICENSE
 ---------------------
 '''
+from dataclasses import dataclass
+from typing import Any, Optional
+
 from sklearn.model_selection import KFold, GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn import svm
+from sklearn import preprocessing, svm
 import numpy as np
 import sklearn
 import xgboost as xgb
@@ -18,6 +21,27 @@ from packaging import version
 
 eFold=3
 iFold=4
+
+
+@dataclass
+class ScepticModel:
+    """Container for a trained SCEPTIC model and metadata."""
+
+    estimator: Any
+    method: str
+    model_type: str
+    label_list: np.ndarray
+    label_encoder: Optional[preprocessing.LabelEncoder]
+    scale_features: bool
+
+
+@dataclass
+class ScepticPrediction:
+    """Prediction outputs from a trained SCEPTIC model."""
+
+    label_predicted: Optional[np.ndarray]
+    pseudotime: np.ndarray
+    probabilities: Optional[np.ndarray]
 
 def _create_xgb_classifier(num_classes, use_gpu=False):
     """
@@ -127,6 +151,161 @@ def _create_xgb_regressor(use_gpu=False):
             UserWarning
         )
         return xgb.XGBRegressor(objective='reg:squarederror')
+
+
+def train_sceptic_model(data, labels, label_list=None, method="svm", parameters=None,
+                        model_type="classification", use_gpu=False, scale_features=None):
+    """Train a SCEPTIC model on the entire dataset without cross-validation.
+
+    Args:
+        data (np.ndarray): Feature matrix shaped as cells × features.
+        labels (np.ndarray): Ground-truth labels matching ``data`` rows.
+        label_list (np.ndarray, optional): Ordered unique labels used for pseudotime.
+            When ``None`` the unique values found in ``labels`` are used.
+        method (str): ``"svm"`` or ``"xgboost"``.
+        parameters (dict, optional): Hyperparameters forwarded to the underlying estimator.
+        model_type (str): ``"classification"`` or ``"regression"``. Regression currently
+            requires ``method="xgboost"``.
+        use_gpu (bool): Pass ``True`` to request GPU acceleration for XGBoost models.
+        scale_features (bool, optional): When ``True`` wraps the estimator in a pipeline with
+            ``StandardScaler``. Defaults to ``True`` for regression and ``False`` otherwise.
+
+    Returns:
+        ScepticModel: Fitted estimator plus metadata required for inference.
+    """
+
+    if model_type not in ["classification", "regression"]:
+        raise ValueError(f"model_type must be 'classification' or 'regression', got '{model_type}'")
+    if model_type == "regression" and method != "xgboost":
+        raise ValueError("Regression mode only supports method='xgboost'")
+
+    if scale_features is None:
+        scale_features = (model_type == "regression")
+
+    data = np.asarray(data)
+    labels = np.asarray(labels)
+
+    if model_type == "classification":
+        lab = preprocessing.LabelEncoder()
+        encoded_labels = lab.fit_transform(labels)
+        unique_labels = np.unique(labels)
+        if label_list is None:
+            label_list_used = lab.classes_
+        else:
+            label_list = np.asarray(label_list)
+            if len(label_list) != len(unique_labels):
+                raise ValueError(
+                    f"label_list length ({len(label_list)}) must equal number of unique labels ({len(unique_labels)})"
+                )
+            label_list_used = label_list
+        num_classes = len(label_list_used)
+        y_train = encoded_labels
+    else:
+        lab = None
+        if label_list is None:
+            label_list_used = np.unique(labels)
+        else:
+            label_list_used = np.asarray(label_list)
+        num_classes = None
+        y_train = labels
+
+    estimator = _initialize_estimator(method=method,
+                                      model_type=model_type,
+                                      num_classes=num_classes,
+                                      use_gpu=use_gpu,
+                                      parameters=parameters,
+                                      scale_features=scale_features)
+
+    estimator.fit(data, y_train)
+
+    return ScepticModel(
+        estimator=estimator,
+        method=method,
+        model_type=model_type,
+        label_list=np.asarray(label_list_used),
+        label_encoder=lab,
+        scale_features=scale_features
+    )
+
+
+def predict_sceptic_model(model, data):
+    """Generate predictions from a :class:`ScepticModel` on new data.
+
+    Args:
+        model (ScepticModel): Trained model returned by :func:`train_sceptic_model`.
+        data (np.ndarray): Feature matrix to score (cells × features).
+
+    Returns:
+        ScepticPrediction: Predicted labels, pseudotime, and class probabilities (if available).
+            For regression ``label_predicted`` and ``probabilities`` are ``None``.
+    """
+
+    estimator = model.estimator
+    data = np.asarray(data)
+
+    if model.model_type == "classification":
+        encoded_pred = estimator.predict(data)
+        if model.label_encoder is not None:
+            predicted_labels = model.label_encoder.inverse_transform(encoded_pred.astype(int))
+        else:
+            predicted_labels = encoded_pred
+
+        try:
+            prob = estimator.predict_proba(data)
+        except Exception:
+            prob = None
+
+        if prob is not None:
+            pseudotime = np.sum(prob * model.label_list, axis=1)
+        else:
+            pseudotime = model.label_list[encoded_pred.astype(int)]
+
+        return ScepticPrediction(
+            label_predicted=predicted_labels,
+            pseudotime=pseudotime,
+            probabilities=prob
+        )
+
+    predicted_continuous = estimator.predict(data)
+    return ScepticPrediction(
+        label_predicted=None,
+        pseudotime=predicted_continuous,
+        probabilities=None
+    )
+
+
+def _initialize_estimator(method, model_type, num_classes, use_gpu, parameters, scale_features):
+    """Create the estimator used by :func:`train_sceptic_model`."""
+
+    parameters = parameters or {}
+
+    if model_type == "classification":
+        if method == "xgboost":
+            base_estimator = _create_xgb_classifier(num_classes=num_classes, use_gpu=use_gpu)
+        elif method == "svm":
+            base_estimator = svm.SVC(probability=True)
+        else:
+            raise ValueError(f"Unsupported method '{method}'. Choose 'svm' or 'xgboost'.")
+        base_estimator.set_params(**parameters)
+        if scale_features:
+            estimator = Pipeline([
+                ("scaler", StandardScaler()),
+                ("classifier", base_estimator)
+            ])
+        else:
+            estimator = base_estimator
+    else:
+        base_estimator = _create_xgb_regressor(use_gpu=use_gpu)
+        base_estimator.set_params(**parameters)
+        if scale_features:
+            estimator = Pipeline([
+                ("scaler", StandardScaler()),
+                ("regressor", base_estimator)
+            ])
+        else:
+            estimator = base_estimator
+
+    return estimator
 
 def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, method="svm", use_gpu=False,
                              cv_strategy="kfold", model_type="classification", eFold=3, iFold=4,
