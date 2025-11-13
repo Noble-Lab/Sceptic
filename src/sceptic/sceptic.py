@@ -9,7 +9,8 @@ MIT LICENSE
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from sklearn.model_selection import KFold, GridSearchCV
+from sklearn.base import clone
+from sklearn.model_selection import KFold, GridSearchCV, StratifiedShuffleSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn import preprocessing, svm
@@ -154,7 +155,9 @@ def _create_xgb_regressor(use_gpu=False):
 
 
 def train_sceptic_model(data, labels, label_list=None, method="svm", parameters=None,
-                        model_type="classification", use_gpu=False, scale_features=None):
+                        model_type="classification", use_gpu=False, scale_features=None,
+                        tuning_sample_size=None, tuning_random_state=42, tuning_label_bins=10,
+                        cv_folds=3):
     """Train a SCEPTIC model on the entire dataset without cross-validation.
 
     Args:
@@ -209,17 +212,32 @@ def train_sceptic_model(data, labels, label_list=None, method="svm", parameters=
         num_classes = None
         y_train = labels
 
+    if parameters:
+        is_grid = any(isinstance(v, (list, tuple)) for v in parameters.values())
+    else:
+        is_grid = False
+
     estimator = _initialize_estimator(method=method,
                                       model_type=model_type,
                                       num_classes=num_classes,
                                       use_gpu=use_gpu,
-                                      parameters=parameters,
+                                      parameters=None if is_grid else parameters,
                                       scale_features=scale_features)
 
-    estimator.fit(data, y_train)
+    tuned_estimator, _ = _fit_with_optional_tuning(
+        estimator=estimator,
+        X_train=data,
+        y_train=y_train,
+        param_grid=parameters if is_grid else None,
+        cv=cv_folds,
+        tuning_sample_size=tuning_sample_size,
+        tuning_random_state=tuning_random_state,
+        is_regression=(model_type == "regression"),
+        tuning_label_bins=tuning_label_bins
+    )
 
     return ScepticModel(
-        estimator=estimator,
+        estimator=tuned_estimator,
         method=method,
         model_type=model_type,
         label_list=np.asarray(label_list_used),
@@ -307,9 +325,78 @@ def _initialize_estimator(method, model_type, num_classes, use_gpu, parameters, 
 
     return estimator
 
+
+def _fit_with_optional_tuning(estimator, X_train, y_train, param_grid, cv,
+                              tuning_sample_size, tuning_random_state,
+                              is_regression, tuning_label_bins):
+    """Fit estimator with optional subsampled hyperparameter tuning."""
+
+    estimator = clone(estimator)
+    best_params = {}
+
+    if param_grid:
+        search_estimator = clone(estimator)
+        X_search, y_search = _maybe_subsample_training_data(
+            X_train,
+            y_train,
+            tuning_sample_size,
+            tuning_random_state,
+            is_regression,
+            tuning_label_bins
+        )
+        grid = GridSearchCV(search_estimator, param_grid, cv=cv)
+        grid.fit(X_search, y_search)
+        best_params = getattr(grid, "best_params_", {})
+        if hasattr(grid, "best_estimator_"):
+            estimator = grid.best_estimator_
+        elif best_params:
+            estimator.set_params(**best_params)
+        else:
+            estimator = search_estimator
+
+    estimator.fit(X_train, y_train)
+    return estimator, best_params
+
+
+def _maybe_subsample_training_data(X, y, max_samples, random_state, is_regression, tuning_label_bins):
+    if max_samples is None or max_samples <= 0 or max_samples >= len(y):
+        return X, y
+
+    strat_labels = _build_stratification_labels(y, is_regression, tuning_label_bins)
+    unique_labels = np.unique(strat_labels)
+
+    if len(unique_labels) < 2:
+        rng = np.random.default_rng(random_state)
+        indices = rng.choice(len(y), size=max_samples, replace=False)
+    else:
+        splitter = StratifiedShuffleSplit(n_splits=1, train_size=max_samples, random_state=random_state)
+        indices, _ = next(splitter.split(np.zeros(len(y)), strat_labels))
+
+    return X[indices], y[indices]
+
+
+def _build_stratification_labels(labels, is_regression, bins):
+    if not is_regression:
+        return labels
+
+    labels = np.asarray(labels)
+    unique_values = np.unique(labels)
+    if len(unique_values) <= bins:
+        mapping = {value: idx for idx, value in enumerate(unique_values)}
+        return np.array([mapping[val] for val in labels])
+
+    quantiles = np.linspace(0, 1, bins + 1)
+    edges = np.quantile(labels, quantiles)
+    edges = np.unique(edges)
+    if len(edges) <= 1:
+        return np.zeros_like(labels, dtype=int)
+    # digitize excludes last edge; ensure finite bins
+    return np.digitize(labels, edges[1:-1], right=False)
+
 def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, method="svm", use_gpu=False,
                              cv_strategy="kfold", model_type="classification", eFold=3, iFold=4,
-                             scale_features=None):
+                             scale_features=None, tuning_sample_size=None, tuning_random_state=42,
+                             tuning_label_bins=10):
     """
     Run pseudotime estimation using SVM or XGBoost with flexible CV and model types.
 
@@ -348,6 +435,12 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
         iFold (int): Number of internal GridSearchCV folds.
         scale_features (bool, optional): When True, wrap the estimator in a pipeline that applies
             `StandardScaler` within each CV split. Defaults to True for regression and False otherwise.
+        tuning_sample_size (int, optional): If provided, limits hyperparameter search to a stratified
+            subsample of this many cells inside each training split. Final models are still fit on the
+            full training data for that split. Defaults to None (use all training cells for tuning).
+        tuning_random_state (int): Random seed used when subsampling for hyperparameter tuning.
+        tuning_label_bins (int): Number of bins to use when stratifying continuous labels during
+            subsampling (regression mode).
 
     Returns:
         tuple: (cm, label_predicted, pseudotime, sceptic_prob)
@@ -574,19 +667,27 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
 
             # Initialize classifier
             if method == "xgboost":
-                xgb_model = _create_xgb_classifier(
+                base_model = _create_xgb_classifier(
                     num_classes=num_classes,
                     use_gpu=use_gpu
                 )
-                clf = GridSearchCV(xgb_model, param_grid or {}, cv=iFold)
             elif method == "svm":
-                svc = svm.SVC(probability=True)
-                clf = GridSearchCV(svc, param_grid or {}, cv=iFold)
+                base_model = svm.SVC(probability=True)
             else:
                 raise ValueError(f"Unsupported method '{method}'. Choose 'svm' or 'xgboost'.")
 
-            # Train and predict
-            clf.fit(X_train, y_train)
+            clf, _ = _fit_with_optional_tuning(
+                estimator=base_model,
+                X_train=X_train,
+                y_train=y_train,
+                param_grid=param_grid or None,
+                cv=iFold,
+                tuning_sample_size=tuning_sample_size,
+                tuning_random_state=tuning_random_state,
+                is_regression=False,
+                tuning_label_bins=tuning_label_bins
+            )
+
             predicted = clf.predict(X_test)
 
             # For LOTO, map predictions back to original label space
@@ -634,10 +735,18 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
                 estimator = xgb_model
                 tuned_grid = param_grid or {}
 
-            clf = GridSearchCV(estimator, tuned_grid, cv=iFold)
+            clf, _ = _fit_with_optional_tuning(
+                estimator=estimator,
+                X_train=X_train,
+                y_train=y_train,
+                param_grid=tuned_grid if tuned_grid else None,
+                cv=iFold,
+                tuning_sample_size=tuning_sample_size,
+                tuning_random_state=tuning_random_state,
+                is_regression=True,
+                tuning_label_bins=tuning_label_bins
+            )
 
-            # Train and predict
-            clf.fit(X_train, y_train)
             predicted_continuous = clf.predict(X_test)
             pseudotime[test_index] = predicted_continuous
 
