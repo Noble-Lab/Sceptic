@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from sklearn.base import clone
 from sklearn.model_selection import KFold, GridSearchCV, StratifiedShuffleSplit
+from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn import preprocessing, svm
@@ -34,6 +35,7 @@ class ScepticModel:
     label_list: np.ndarray
     label_encoder: Optional[preprocessing.LabelEncoder]
     scale_features: bool
+    dim_reduction: Optional[dict]
 
 
 @dataclass
@@ -156,6 +158,7 @@ def _create_xgb_regressor(use_gpu=False):
 
 def train_sceptic_model(data, labels, label_list=None, method="svm", parameters=None,
                         model_type="classification", use_gpu=False, scale_features=None,
+                        dim_reduction=None, dim_reduction_kwargs=None,
                         tuning_sample_size=None, tuning_random_state=42, tuning_label_bins=10,
                         cv_folds=3):
     """Train a SCEPTIC model on the entire dataset without cross-validation.
@@ -184,6 +187,8 @@ def train_sceptic_model(data, labels, label_list=None, method="svm", parameters=
 
     if scale_features is None:
         scale_features = (model_type == "regression")
+
+    dim_params = _normalize_dim_reduction_params(dim_reduction, dim_reduction_kwargs)
 
     data = np.asarray(data)
     labels = np.asarray(labels)
@@ -222,7 +227,8 @@ def train_sceptic_model(data, labels, label_list=None, method="svm", parameters=
                                       num_classes=num_classes,
                                       use_gpu=use_gpu,
                                       parameters=None if is_grid else parameters,
-                                      scale_features=scale_features)
+                                      scale_features=scale_features,
+                                      dim_reduction_params=dim_params)
 
     tuned_estimator, _ = _fit_with_optional_tuning(
         estimator=estimator,
@@ -242,7 +248,11 @@ def train_sceptic_model(data, labels, label_list=None, method="svm", parameters=
         model_type=model_type,
         label_list=np.asarray(label_list_used),
         label_encoder=lab,
-        scale_features=scale_features
+        scale_features=scale_features,
+        dim_reduction={
+            "enabled": dim_params is not None,
+            "params": dim_params
+        }
     )
 
 
@@ -292,7 +302,8 @@ def predict_sceptic_model(model, data):
     )
 
 
-def _initialize_estimator(method, model_type, num_classes, use_gpu, parameters, scale_features):
+def _initialize_estimator(method, model_type, num_classes, use_gpu, parameters,
+                          scale_features, dim_reduction_params):
     """Create the estimator used by :func:`train_sceptic_model`."""
 
     parameters = parameters or {}
@@ -305,25 +316,60 @@ def _initialize_estimator(method, model_type, num_classes, use_gpu, parameters, 
         else:
             raise ValueError(f"Unsupported method '{method}'. Choose 'svm' or 'xgboost'.")
         base_estimator.set_params(**parameters)
-        if scale_features:
-            estimator = Pipeline([
-                ("scaler", StandardScaler()),
-                ("classifier", base_estimator)
-            ])
-        else:
-            estimator = base_estimator
+        estimator = _build_pipeline(base_estimator, final_step_name="classifier",
+                                    scale_features=scale_features,
+                                    dim_reduction_params=dim_reduction_params)
     else:
         base_estimator = _create_xgb_regressor(use_gpu=use_gpu)
         base_estimator.set_params(**parameters)
-        if scale_features:
-            estimator = Pipeline([
-                ("scaler", StandardScaler()),
-                ("regressor", base_estimator)
-            ])
-        else:
-            estimator = base_estimator
+        estimator = _build_pipeline(base_estimator, final_step_name="regressor",
+                                    scale_features=scale_features,
+                                    dim_reduction_params=dim_reduction_params)
 
     return estimator
+
+
+def _build_pipeline(base_estimator, final_step_name, scale_features, dim_reduction_params):
+    steps = []
+    if scale_features:
+        steps.append(("scaler", StandardScaler()))
+    if dim_reduction_params:
+        steps.append(("pca", PCA(**dim_reduction_params)))
+
+    if not steps:
+        return base_estimator
+
+    steps.append((final_step_name, base_estimator))
+    return Pipeline(steps)
+
+
+def _normalize_dim_reduction_params(dim_reduction, dim_reduction_kwargs):
+    if dim_reduction is None and not dim_reduction_kwargs:
+        return None
+
+    if isinstance(dim_reduction, dict):
+        params = dim_reduction.copy()
+        if dim_reduction_kwargs:
+            params.update(dim_reduction_kwargs)
+        return params
+
+    params = dict(dim_reduction_kwargs or {})
+    if dim_reduction not in (None, False, 0):
+        params.setdefault("n_components", dim_reduction)
+    if not params:
+        return None
+    return params
+
+
+def _normalize_param_grid(param_grid, estimator):
+    if not param_grid:
+        return None
+    if not isinstance(estimator, Pipeline):
+        return param_grid
+    if any("__" in key for key in param_grid.keys()):
+        return param_grid
+    final_step = list(estimator.named_steps.keys())[-1]
+    return {f"{final_step}__{key}": value for key, value in param_grid.items()}
 
 
 def _fit_with_optional_tuning(estimator, X_train, y_train, param_grid, cv,
@@ -334,7 +380,9 @@ def _fit_with_optional_tuning(estimator, X_train, y_train, param_grid, cv,
     estimator = clone(estimator)
     best_params = {}
 
-    if param_grid:
+    normalized_grid = _normalize_param_grid(param_grid, estimator)
+
+    if normalized_grid:
         search_estimator = clone(estimator)
         X_search, y_search = _maybe_subsample_training_data(
             X_train,
@@ -344,7 +392,7 @@ def _fit_with_optional_tuning(estimator, X_train, y_train, param_grid, cv,
             is_regression,
             tuning_label_bins
         )
-        grid = GridSearchCV(search_estimator, param_grid, cv=cv)
+        grid = GridSearchCV(search_estimator, normalized_grid, cv=cv)
         grid.fit(X_search, y_search)
         best_params = getattr(grid, "best_params_", {})
         if hasattr(grid, "best_estimator_"):
@@ -395,7 +443,8 @@ def _build_stratification_labels(labels, is_regression, bins):
 
 def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, method="svm", use_gpu=False,
                              cv_strategy="kfold", model_type="classification", eFold=3, iFold=4,
-                             scale_features=None, tuning_sample_size=None, tuning_random_state=42,
+                             scale_features=None, dim_reduction=None, dim_reduction_kwargs=None,
+                             tuning_sample_size=None, tuning_random_state=42,
                              tuning_label_bins=10):
     """
     Run pseudotime estimation using SVM or XGBoost with flexible CV and model types.
@@ -435,6 +484,10 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
         iFold (int): Number of internal GridSearchCV folds.
         scale_features (bool, optional): When True, wrap the estimator in a pipeline that applies
             `StandardScaler` within each CV split. Defaults to True for regression and False otherwise.
+        dim_reduction (int or dict, optional): When provided, inserts a PCA step (with `n_components`
+            set to this value or based on the provided dict) inside the training pipeline.
+        dim_reduction_kwargs (dict, optional): Extra keyword arguments forwarded to PCA when
+            `dim_reduction` is not a dict.
         tuning_sample_size (int, optional): If provided, limits hyperparameter search to a stratified
             subsample of this many cells inside each training split. Final models are still fit on the
             full training data for that split. Defaults to None (use all training cells for tuning).
@@ -493,6 +546,8 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
     if scale_features is None:
         scale_features = (model_type == "regression")
 
+    dim_params = _normalize_dim_reduction_params(dim_reduction, dim_reduction_kwargs)
+
     # Handle labels and label_list based on model type
     unique_labels = np.unique(labels)
 
@@ -526,7 +581,7 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
             if len(unique_labels) > 2 and np.allclose(unique_labels, np.arange(len(unique_labels))):
                 warnings.warn(
                     "\n" + "="*80 + "\n"
-                    "⚠️  REGRESSION WARNING: Labels look like encoded values (0, 1, 2, ...)\n"
+                    "⚠️  REGRESSION WARNING: Labels look like encoded categorical values (0, 1, 2, ...)\n"
                     "="*80 + "\n"
                     "Your labels appear to be encoded categorical values, not actual time values!\n"
                     "\n"
@@ -665,19 +720,18 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
             else:
                 num_classes = len(label_list)
 
-            # Initialize classifier
-            if method == "xgboost":
-                base_model = _create_xgb_classifier(
-                    num_classes=num_classes,
-                    use_gpu=use_gpu
-                )
-            elif method == "svm":
-                base_model = svm.SVC(probability=True)
-            else:
-                raise ValueError(f"Unsupported method '{method}'. Choose 'svm' or 'xgboost'.")
+            estimator = _initialize_estimator(
+                method=method,
+                model_type="classification",
+                num_classes=num_classes,
+                use_gpu=use_gpu,
+                parameters=None,
+                scale_features=scale_features,
+                dim_reduction_params=dim_params
+            )
 
             clf, _ = _fit_with_optional_tuning(
-                estimator=base_model,
+                estimator=estimator,
                 X_train=X_train,
                 y_train=y_train,
                 param_grid=param_grid or None,
@@ -720,20 +774,16 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
         else:  # regression
             y_train, y_test = labels[train_index], labels[test_index]
 
-            # Initialize regressor
-            xgb_model = _create_xgb_regressor(use_gpu=use_gpu)
-            if scale_features:
-                estimator = Pipeline([
-                    ("scaler", StandardScaler()),
-                    ("regressor", xgb_model)
-                ])
-                if param_grid:
-                    tuned_grid = {f"regressor__{key}": value for key, value in param_grid.items()}
-                else:
-                    tuned_grid = {}
-            else:
-                estimator = xgb_model
-                tuned_grid = param_grid or {}
+            tuned_grid = param_grid or {}
+            estimator = _initialize_estimator(
+                method="xgboost",
+                model_type="regression",
+                num_classes=None,
+                use_gpu=use_gpu,
+                parameters=None,
+                scale_features=scale_features,
+                dim_reduction_params=dim_params
+            )
 
             clf, _ = _fit_with_optional_tuning(
                 estimator=estimator,

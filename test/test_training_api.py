@@ -2,6 +2,7 @@
 
 import numpy as np
 from sklearn.datasets import make_blobs
+from sklearn.pipeline import Pipeline
 
 from sceptic import predict_sceptic_model, train_sceptic_model
 
@@ -51,3 +52,18 @@ def test_train_and_predict_regression():
     assert preds.label_predicted is None
     assert preds.probabilities is None
     assert preds.pseudotime.shape == (5,)
+
+
+def test_dim_reduction_inserts_pca_step():
+    X, y = make_blobs(n_samples=100, centers=3, random_state=1, cluster_std=1.2)
+
+    model = train_sceptic_model(
+        data=X,
+        labels=y,
+        method="svm",
+        dim_reduction=2,
+        scale_features=True,
+    )
+
+    assert isinstance(model.estimator, Pipeline)
+    assert "pca" in model.estimator.named_steps
