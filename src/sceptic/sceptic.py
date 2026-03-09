@@ -32,11 +32,17 @@ def _create_xgb_classifier(num_classes, use_gpu=False):
     xgb_version = version.parse(xgb.__version__)
 
     # Base parameters that work across versions
-    base_params = {
-        'objective': 'multi:softprob',
-        'num_class': num_classes,
-        'eval_metric': 'mlogloss'
-    }
+    if num_classes == 2:
+        base_params = {
+            'objective': 'binary:logistic',
+            'eval_metric': 'logloss'
+        }
+    else:
+        base_params = {
+            'objective': 'multi:softprob',
+            'num_class': num_classes,
+            'eval_metric': 'mlogloss'
+        }
 
     # Version-specific GPU parameters
     if xgb_version >= version.parse("3.1.0"):
@@ -69,6 +75,8 @@ def _create_xgb_classifier(num_classes, use_gpu=False):
             f"Using minimal configuration.",
             UserWarning
         )
+        if num_classes == 2:
+            return xgb.XGBClassifier(objective='binary:logistic')
         return xgb.XGBClassifier(
             objective='multi:softprob',
             num_class=num_classes
@@ -119,6 +127,15 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
     # Handle labels and label_list
     # Check if labels need encoding (contain non-consecutive integers or floats)
     unique_labels = np.unique(labels)
+
+    if len(unique_labels) == 2:
+        warnings.warn(
+            "Two-timepoint classification is supported, but this setting was "
+            "not benchmarked in the original Sceptic study. Interpret results "
+            "with additional caution.",
+            UserWarning,
+            stacklevel=2
+        )
 
     # If label_list is not provided, infer it from labels
     if label_list is None:
@@ -184,7 +201,11 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
         clf.fit(X_train, y_train)
         predicted = clf.predict(X_test)
         label_predicted[test_index] = predicted
-        cm += sklearn.metrics.confusion_matrix(y_test, predicted)
+        cm += sklearn.metrics.confusion_matrix(
+            y_test,
+            predicted,
+            labels=np.arange(len(label_list))
+        )
 
         try:
             prob = clf.predict_proba(X_test)
