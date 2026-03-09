@@ -65,6 +65,40 @@ cm, pred, pseudotime, prob = run_sceptic_and_evaluate(
 - ✅ More intuitive and less error-prone
 - ✅ Backward compatible with existing code
 
+### Two-Timepoint Datasets
+
+Sceptic supports classification datasets with exactly two time points for both
+`svm` and `xgboost`.
+
+Please note:
+- this setting was not benchmarked in the original Sceptic study
+- results should be interpreted with additional caution
+- pseudotime values in this setting are derived from binary class probabilities
+
+For time-series applications, datasets with three or more time points remain the
+intended use case.
+
+### IMPORTANT: Regression Mode Label Requirements
+
+When using regression mode, labels must be the actual time values, not encoded
+class IDs.
+
+Correct usage:
+
+```python
+time_labels = np.array([0, 8, 16, 0, 8, 16])
+```
+
+Incorrect usage:
+
+```python
+encoded_labels = np.array([0, 1, 2, 0, 1, 2])
+```
+
+Using encoded labels in regression mode can artificially inflate performance and
+lead to misleading pseudotime estimates. If your labels are categorical class
+IDs, use classification mode instead.
+
 Sceptic also includes utility modules for comprehensive evaluation and publication-quality visualization!
 
 ### Evaluation Utilities
