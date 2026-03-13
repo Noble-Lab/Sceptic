@@ -78,6 +78,27 @@ Please note:
 For time-series applications, datasets with three or more time points remain the
 intended use case.
 
+### Development Features (Experimental)
+
+The following features are available on the `dev/loto-and-regression` branch but
+are not yet part of the main release:
+
+```bash
+# Install development version
+pip install git+https://github.com/Noble-Lab/Sceptic.git@dev/loto-and-regression
+```
+
+**⚠️ These features are experimental and lack manuscript validation. Use with caution.**
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| **Regression Mode** | Direct XGBoost regression (`model_type="regression"`) | Experimental |
+| **LOTO Validation** | Leave-One-Time-Out cross-validation (`cv_strategy="loto"`) | Experimental |
+| **Standalone API** | `train_sceptic_model()` / `predict_sceptic_model()` | Experimental |
+
+These features are under active development. APIs may change in future releases.
+For production use, we recommend the main branch (`pip install sceptic`).
+
 ### ⚠️ IMPORTANT: Regression Mode Label Requirements
 
 **If you're using `model_type="regression"` (direct XGBoost regression), you MUST pass actual time values, NOT encoded labels!**
