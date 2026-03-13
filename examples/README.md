@@ -32,6 +32,17 @@ Advanced evaluation and visualization using the new utility modules:
 
 **Recommended for:** Users preparing results for publication or who need detailed performance metrics.
 
+### 4. Two-Timepoint Classification (`two_timepoint_classification.py`)
+Short script showing how to run Sceptic on a two-timepoint subset of the bundled
+scGEM dataset:
+- demonstrates both `svm` and `xgboost`
+- uses the existing example data rather than a synthetic toy dataset
+- documents that `kfold` is the supported CV mode for two time points
+- reminds users that this setting was not benchmarked in the original study
+
+**Recommended for:** Users with exactly two time points who want a minimal
+working example.
+
 ## Getting Started
 
 ### Installation
@@ -60,6 +71,12 @@ pip install jupyter matplotlib seaborn scipy
    jupyter notebook
    ```
 4. Open any of the example notebooks
+
+To run the two-timepoint script directly from the repository root:
+
+```bash
+python examples/two_timepoint_classification.py
+```
 
 ## Data Requirements
 

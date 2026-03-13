@@ -61,11 +61,17 @@ def _create_xgb_classifier(num_classes, use_gpu=False):
     xgb_version = version.parse(xgb.__version__)
 
     # Base parameters that work across versions
-    base_params = {
-        'objective': 'multi:softprob',
-        'num_class': num_classes,
-        'eval_metric': 'mlogloss'
-    }
+    if num_classes == 2:
+        base_params = {
+            'objective': 'binary:logistic',
+            'eval_metric': 'logloss'
+        }
+    else:
+        base_params = {
+            'objective': 'multi:softprob',
+            'num_class': num_classes,
+            'eval_metric': 'mlogloss'
+        }
 
     # Version-specific GPU parameters
     if xgb_version >= version.parse("3.1.0"):
@@ -98,6 +104,8 @@ def _create_xgb_classifier(num_classes, use_gpu=False):
             f"Using minimal configuration.",
             UserWarning
         )
+        if num_classes == 2:
+            return xgb.XGBClassifier(objective='binary:logistic')
         return xgb.XGBClassifier(
             objective='multi:softprob',
             num_class=num_classes
@@ -552,6 +560,15 @@ def run_sceptic_and_evaluate(data, labels, label_list=None, parameters=None, met
     unique_labels = np.unique(labels)
 
     if model_type == "classification":
+        # Warn about two-timepoint classification
+        if len(unique_labels) == 2:
+            warnings.warn(
+                "Two-timepoint classification is supported, but this setting was "
+                "not benchmarked in the original Sceptic study. Interpret results "
+                "with additional caution.",
+                UserWarning,
+                stacklevel=2
+            )
         # Classification: encode labels to 0, 1, 2, ...
         if label_list is None:
             label_list = unique_labels

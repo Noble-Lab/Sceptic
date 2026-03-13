@@ -16,7 +16,7 @@ Sceptic can perform pseudotime analysis on various types of single-cell/single-n
 
 
 ## Installation<a id="installation"></a>
-Sceptic software is available on the Python package index (PyPI), latest version 0.3.3. To install it using pip, simply type:
+Sceptic software is available on the Python package index (PyPI), latest version 0.4.1. To install it using pip, simply type:
 ```bash
 $ pip install sceptic
 ```
@@ -64,6 +64,19 @@ cm, pred, pseudotime, prob = run_sceptic_and_evaluate(
 - ✅ Pseudotime values in meaningful biological units
 - ✅ More intuitive and less error-prone
 - ✅ Backward compatible with existing code
+
+### Two-Timepoint Datasets
+
+Sceptic supports classification datasets with exactly two time points for both
+`svm` and `xgboost`.
+
+Please note:
+- this setting was not benchmarked in the original Sceptic study
+- results should be interpreted with additional caution
+- pseudotime values in this setting are derived from binary class probabilities
+
+For time-series applications, datasets with three or more time points remain the
+intended use case.
 
 ### ⚠️ IMPORTANT: Regression Mode Label Requirements
 
